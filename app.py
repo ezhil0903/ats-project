@@ -1,62 +1,85 @@
 import uuid
+import re
 
 @app.route("/upload", methods=["POST"])
 def upload_resume():
     try:
+        # =========================
         # 🔥 ROLE INPUT
-        role = request.form.get("role", "").lower()
+        # =========================
+        role = request.form.get("role", "").lower().strip()
 
         if role not in JOB_ROLES:
             return jsonify({"error": "Invalid role selected"}), 400
 
-        # 🔥 COPY ROLE SKILLS (important)
+        # ✅ Copy to avoid modifying original
         job_skills = JOB_ROLES[role].copy()
 
-        # 🔥 NEW: JOB DESCRIPTION INPUT
-        job_description = request.form.get("job_description", "").lower()
+        # =========================
+        # 🔥 JOB DESCRIPTION INPUT
+        # =========================
+        job_description = request.form.get("job_description", "").lower().strip()
 
-        # 🔥 ADD JD KEYWORDS TO SKILLS
         if job_description:
-            jd_words = job_description.split()
+            # ✅ Clean keyword extraction (IMPORTANT FIX)
+            jd_words = re.findall(r'\b[a-zA-Z]{4,}\b', job_description)
 
             for word in jd_words:
-                if len(word) > 3:  # ignore small words
-                    job_skills[word] = job_skills.get(word, 5)
+                job_skills[word] = job_skills.get(word, 5)
 
+        # =========================
         # 🔥 FILE VALIDATION
+        # =========================
         if "resume" not in request.files:
             return jsonify({"error": "No file uploaded"}), 400
 
         file = request.files["resume"]
 
-        if file.filename == "":
+        if file.filename.strip() == "":
             return jsonify({"error": "Empty file"}), 400
 
-        # 🔥 SAFE FILE NAME (NO OVERWRITE)
+        # =========================
+        # 🔥 SAFE FILE NAME
+        # =========================
         filename = str(uuid.uuid4()) + "_" + file.filename
         file_path = os.path.join(UPLOAD_FOLDER, filename)
         file.save(file_path)
 
         print("✅ File saved:", filename)
 
+        # =========================
         # 🔥 EXTRACT TEXT
+        # =========================
         text = extract_text(file_path)
 
-        if not text:
-            return jsonify({"error": "Could not extract text"}), 400
+        if not text or len(text.strip()) < 20:
+            os.remove(file_path)
+            return jsonify({"error": "Could not extract text from resume"}), 400
 
-        # 🔥 SKILLS EXTRACTION
+        # =========================
+        # 🔥 SKILL EXTRACTION
+        # =========================
         skills = extract_skills(text)
 
-        # 🔥 SCORING (HYBRID AI)
+        # =========================
+        # 🔥 SCORING
+        # =========================
         result = calculate_score(text, job_skills)
 
-        # 🔥 SUGGESTIONS SAFE ACCESS
+        # =========================
+        # 🔥 SUGGESTIONS
+        # =========================
         suggestions = generate_suggestions(result.get("missing", []))
 
-        # 🔥 DELETE FILE AFTER USE
-        os.remove(file_path)
+        # =========================
+        # 🔥 CLEANUP
+        # =========================
+        if os.path.exists(file_path):
+            os.remove(file_path)
 
+        # =========================
+        # 🔥 RESPONSE
+        # =========================
         return jsonify({
             "role": role,
             "skills_found": skills,
